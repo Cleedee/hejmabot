@@ -49,14 +49,14 @@ class ProcessadorUniversal:
         TEXTO DO USUÁRIO:
         "{texto}"
 
-        RETORNE APENAS UM JSON NESTE FORMATO:
+        RETORNE APENAS UM JSON NESTE FORMATO, SEM EXPLICAÇÕES:
         {{
             "local_compra": "Nome do Local ou null",
             "itens": [
                 {{
                     "nome": "string",
                     "categoria": "string",
-                    "quantidade": float,
+                    "quantidade_inicial": float,
                     "unidade": "string",
                     "preco_pago": float,
                     "data_validade": "YYYY-MM-DD"
@@ -67,6 +67,7 @@ class ProcessadorUniversal:
 
 
         response = ollama.chat(model=self.model, messages=[{'role': 'user', 'content': prompt}])
+        print(response["message"]["content"])
         
         try:
             # Limpa a resposta caso a IA coloque blocos de código ```json

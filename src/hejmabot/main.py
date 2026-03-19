@@ -24,6 +24,7 @@ api = EstoqueAPI(base_url=API_URL)
 
 nlp = ProcessadorUniversal()
 
+
 async def comer_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /comer uvas Elisa
     if len(context.args) < 2:
@@ -35,32 +36,39 @@ async def comer_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # 1. Busca o item na API
         itens = await api.listar_itens()
-        item = next((i for i in itens if item_busca.lower() in i['nome'].lower()), None)
+        item = next((i for i in itens if item_busca.lower() in i["nome"].lower()), None)
 
         if not item:
             await update.message.reply_text("❌ Esse item não está no inventário!")
             return
 
         # 2. Dá baixa no item
-        await api.consumir_item(item['id'])
+        await api.consumir_item(item["id"])
 
         # 3. Calcula XP (Bónus para comida saudável)
-        xp_ganho = 20 if item['categoria'].lower() in ['fruta', 'vegetal', 'saudavel'] else 5
+        xp_ganho = (
+            20 if item["categoria"].lower() in ["fruta", "vegetal", "saudavel"] else 5
+        )
 
         # 4. Atualiza o herói via API
         status = api.dar_xp(nome_heroi, xp_ganho)
 
-        msg = (f"🍎 **Missão Concluída!**\n"
-               f"{nome_heroi} consumiu {item['nome']} e ganhou {xp_ganho} XP!\n"
-               f"Nível Atual: {status['nivel']} (Total XP: {status['xp']})")
-        
+        msg = (
+            f"🍎 **Missão Concluída!**\n"
+            f"{nome_heroi} consumiu {item['nome']} e ganhou {xp_ganho} XP!\n"
+            f"Nível Atual: {status['nivel']} (Total XP: {status['xp']})"
+        )
+
         await update.message.reply_text(msg, parse_mode="Markdown")
 
     except Exception as e:
         await update.message.reply_text(f"Erro na aventura: {e}")
 
+
 async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 O Ollama está analisando seu consumo do último mês...")
+    await update.message.reply_text(
+        "🤖 O Ollama está analisando seu consumo do último mês..."
+    )
     try:
         # 1. Busca dados na API
         historico = api.buscar_historico_consumo()
@@ -69,36 +77,40 @@ async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_T
         analista = AnalistaEconomico()
         analise = analista.analisar_gastos(historico)
 
-        await update.message.reply_text(f"📊 **Relatório de Consumo Local:**\n\n{analise}", parse_mode="Markdown")
-       
+        await update.message.reply_text(
+            f"📊 **Relatório de Consumo Local:**\n\n{analise}", parse_mode="Markdown"
+        )
+
     except Exception as e:
         await update.message.reply_text(f"Erro ao gerar relatório: {e}")
 
+
 async def processar_mensagem_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_usuario = update.message.text
-    status_msg = await update.message.reply_text(
-        "🧠 Analisando sua entrada..."
-    )
+    status_msg = await update.message.reply_text("🧠 Analisando sua entrada...")
 
     try:
 
         dados_extraidos = await nlp.processar_entrada(texto_usuario)
+        assert dados_extraidos is not None
         local = dados_extraidos.get("local_compra")
         itens = dados_extraidos.get("itens", [])
 
         for item in itens:
             if local and not item.get("local_compra"):
                 item["estabelecimento"] = local
-                
+
             await api.adicionar_item(item)
 
         resumo = f"✅ Sucesso! {len(itens)} itens registrados"
-        if local: resumo += f" no {local}."
+        if local:
+            resumo += f" no {local}."
 
         await status_msg.edit_text(resumo)
 
     except Exception as e:
         await status_msg.edit_text(f"❌ Erro ao processar: {e}")
+
 
 async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -154,7 +166,9 @@ async def estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         mensagem = "**📦 Estoque Atual:**\n\n"
         for item in itens:
-            mensagem += f"• {item['nome']}: {item['quantidade']} {item['unidade']}\n"
+            mensagem += (
+                f"• {item['nome']}: {item['quantidade_atual']} {item['unidade']}\n"
+            )
 
         await update.message.reply_text(mensagem, parse_mode="Markdown")
     except Exception as e:
