@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, time, date
-from dotenv import load_dotenv
+from dotenv import load_dotenv 
 
 from telegram import Update
 from telegram.ext import (
@@ -23,47 +23,6 @@ CHAT_ID_PESSOAL = os.getenv("CHAT_ID_PESSOAL")
 api = EstoqueAPI(base_url=API_URL)
 
 nlp = ProcessadorUniversal()
-
-
-async def comer_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # /comer uvas Elisa
-    if len(context.args) < 2:
-        await update.message.reply_text("Uso: /comer [item] [seu_nome]")
-        return
-
-    item_busca, nome_heroi = context.args[0], context.args[1]
-
-    try:
-        # 1. Busca o item na API
-        itens = await api.listar_itens()
-        item = next((i for i in itens if item_busca.lower() in i["nome"].lower()), None)
-
-        if not item:
-            await update.message.reply_text("❌ Esse item não está no inventário!")
-            return
-
-        # 2. Dá baixa no item
-        await api.consumir_item(item["id"])
-
-        # 3. Calcula XP (Bónus para comida saudável)
-        xp_ganho = (
-            20 if item["categoria"].lower() in ["fruta", "vegetal", "saudavel"] else 5
-        )
-
-        # 4. Atualiza o herói via API
-        status = api.dar_xp(nome_heroi, xp_ganho)
-
-        msg = (
-            f"🍎 **Missão Concluída!**\n"
-            f"{nome_heroi} consumiu {item['nome']} e ganhou {xp_ganho} XP!\n"
-            f"Nível Atual: {status['nivel']} (Total XP: {status['xp']})"
-        )
-
-        await update.message.reply_text(msg, parse_mode="Markdown")
-
-    except Exception as e:
-        await update.message.reply_text(f"Erro na aventura: {e}")
-
 
 async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
