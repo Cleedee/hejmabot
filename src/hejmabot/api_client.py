@@ -5,11 +5,6 @@ class EstoqueAPI:
     def __init__(self, base_url: str = "http://127.0.0.1:8081"):
         self.base_url = base_url
 
-    async def dar_xp(self, nome_heroi: str, quantidade_xp: int):
-        async with httpx.AsyncClient() as client:
-            r = await client.patch(f"{self.base_url}/personagens/{nome_heroi}/ganhar-xp", params={"quantidade_xp": quantidade_xp})
-            return r.json()
-
     async def buscar_historico_consumo(self, dias: int = 30):
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{self.base_url}/itens/historico-consumo/?dias={dias}")

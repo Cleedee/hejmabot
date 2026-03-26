@@ -56,7 +56,7 @@ class ProcessadorUniversal:
                 {{
                     "nome": "string",
                     "categoria": "string",
-                    "quantidade_inicial": float,
+                    "quantidade": float,
                     "unidade": "string",
                     "preco_pago": float,
                     "data_validade": "YYYY-MM-DD"

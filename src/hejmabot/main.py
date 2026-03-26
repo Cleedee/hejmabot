@@ -188,7 +188,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("checar", checar_agora))
     app.add_handler(CommandHandler("usar", usar_item))
     app.add_handler(CommandHandler("relatorio", gerar_relatorio_mensal))
-    app.add_handler(CommandHandler("comer", comer_item))
     app.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), processar_mensagem_texto)
     )
