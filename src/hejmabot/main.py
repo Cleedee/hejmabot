@@ -10,9 +10,15 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+import httpx
 
 from hejmabot.api_client import EstoqueAPI
-from hejmabot.nlp_processor import ProcessadorUniversal, AnalistaEconomico
+from hejmabot.nlp_processor import (
+        ProcessadorUniversal, 
+        AnalistaEconomico,
+        ProcessadorCompras,
+        Receitas
+)
 
 load_dotenv()
 
@@ -23,6 +29,77 @@ CHAT_ID_PESSOAL = os.getenv("CHAT_ID_PESSOAL")
 api = EstoqueAPI(base_url=API_URL)
 
 nlp = ProcessadorUniversal()
+
+processador = ProcessadorCompras()
+
+receitas = Receitas()
+
+async def sugerir_jantar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 1. Feedback imediato ao usuário
+    await update.message.reply_text("👨‍🍳 Deixe-me ver o que temos na despensa que precisa de atenção...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+
+    try:
+        # 2. Busca apenas itens vencendo na API
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{API_URL}/produtos/alertas")
+            vencendo = r.json().get('vencendo_em_breve', [])
+
+        if not vencendo:
+            await update.message.reply_text("🌟 Parabéns! Nada está perto de vencer. Pode cozinhar o que quiser!")
+            return
+
+        # 3. IA processa a receita
+        receita = await receitas.sugerir_receita(vencendo)
+        
+        await update.message.reply_text(
+            f"💡 **Sugestão do Chef Hejmai:**\n\n{receita}", 
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ O Chef teve um problema na cozinha: {e}")
+
+async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Uso: /usar 1 maca (quantidade + nome)
+    if len(context.args) < 2:
+        await update.message.reply_text("💡 Use: /usar [quantidade] [nome do item]")
+        return
+
+    try:
+        qtd = float(context.args[0])
+        busca_nome = " ".join(context.args[1:])
+        
+        # 1. Buscar o ID do produto via API (Fuzzy search ou busca simples)
+        async with httpx.AsyncClient() as client:
+            # Endpoint que lista produtos ativos
+            r = await client.get(f"{API_URL}/produtos/")
+            produtos = r.json()
+            
+            # Busca simples por contorno de string
+            produto = next((p for p in produtos if busca_nome.lower() in p['nome'].lower()), None)
+
+            if not produto:
+                await update.message.reply_text(f"❓ Não encontrei '{busca_nome}' no estoque.")
+                return
+
+            # 2. Registrar o consumo
+            payload = {"quantidade": qtd }
+            res = await client.patch(f"{API_URL}/produtos/consumir/{produto['id']}", params=payload)
+            
+            if res.status_code == 200:
+                dados = res.json()
+                texto = f"✅ **Baixa Registrada!**\n"
+                texto += f"Item: {produto['nome']}\n"
+                texto += f"Restante: {dados['estoque_restante']} {produto['unidade_medida']}"
+                
+                await update.message.reply_text(texto, parse_mode="Markdown")
+            else:
+                erro = res.json().get('detail', 'Erro desconhecido')
+                await update.message.reply_text(f"❌ {erro}")
+
+    except ValueError:
+        await update.message.reply_text("❌ A quantidade deve ser um número (ex: /usar 0.5 leite).")
 
 async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -42,33 +119,6 @@ async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_T
 
     except Exception as e:
         await update.message.reply_text(f"Erro ao gerar relatório: {e}")
-
-
-async def processar_mensagem_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto_usuario = update.message.text
-    status_msg = await update.message.reply_text("🧠 Analisando sua entrada...")
-
-    try:
-
-        dados_extraidos = await nlp.processar_entrada(texto_usuario)
-        assert dados_extraidos is not None
-        local = dados_extraidos.get("local_compra")
-        itens = dados_extraidos.get("itens", [])
-
-        for item in itens:
-            if local and not item.get("local_compra"):
-                item["estabelecimento"] = local
-
-            await api.adicionar_item(item)
-
-        resumo = f"✅ Sucesso! {len(itens)} itens registrados"
-        if local:
-            resumo += f" no {local}."
-
-        await status_msg.edit_text(resumo)
-
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Erro ao processar: {e}")
 
 
 async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,16 +155,6 @@ async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Erro de conexão: {e}")
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_chat.id
-    print(
-        f"DEBUG: O Chat ID deste usuário é: {user_id}"
-    )  # Vai aparecer no seu terminal
-    await update.message.reply_text(
-        "Olá! Sou o Hejmabot. Posso te ajudar a gerenciar seu estoque doméstico.\n"
-        "Use /estoque para ver o que temos."
-    )
-
 
 async def estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -134,40 +174,69 @@ async def estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Erro ao conectar na API: {e}")
 
 
-async def checar_agora(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Verificando validades no backend...")
-    await callback_validade(context)
-
-
-# --- TAREFA AGENDADA ---
-async def callback_validade(context: ContextTypes.DEFAULT_TYPE):
-    """Função que será chamada pelo agendador"""
+async def registrar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text
+    
+    status_msg = await update.message.reply_text("🧠 Analisando sua entrada...")
+    
     try:
-        # Busca itens que vencem nos próximos 5 dias
-        alertas = await api.buscar_alertas(dias=5)
-
-        if alertas:
-            mensagem = "⚠️ **AGENTE DE SAÚDE DOMÉSTICA**\n\n"
-            mensagem += "Identifiquei itens próximos do vencimento:\n"
-
-            for item in alertas:
-                # Cálculo simples de dias restantes
-                validade = datetime.strptime(item["data_validade"], "%Y-%m-%d").date()
-                hoje = date.today()
-                dias_restantes = (validade - hoje).days
-
-                status = "🔴" if dias_restantes <= 2 else "🟡"
-                mensagem += (
-                    f"{status} *{item['nome']}*: vence em {dias_restantes} dias\n"
-                )
-
-            mensagem += "\n_Sugestão: Que tal planejar o jantar com estes itens?_"
-
-            await context.bot.send_message(
-                chat_id=CHAT_ID_PESSOAL, text=mensagem, parse_mode="Markdown"
+        # A mágica acontece aqui: o Ollama gera o JSON relacional
+        dados_json = await processador.extrair_dados_relacionais(texto)
+        
+        # Envia para o seu backend FastAPI na porta 8081
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{API_URL}/compras/registrar-lote", 
+                json=dados_json
             )
+            
+            if response.status_code == 201:
+                res = response.json()
+                await update.message.reply_text(
+                    f"📦 {res['itens']} itens registrados com sucesso no banco relacional!"
+                )
+            else:
+                await update.message.reply_text("❌ Erro ao salvar no banco de dados.")
+                
     except Exception as e:
-        print(f"Erro na verificação automática: {e}")
+        await update.message.reply_text(f"⚠️ Falha no processamento da IA: {e}")
+
+async def verificar_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_URL}/produtos/alertas")
+            data = response.json()
+            
+        mensagem = "📊 **Relatório de Inventário**\n\n"
+        
+        if data['vencendo_em_breve']:
+            mensagem += "⚠️ **VENCENDO EM BREVE:**\n"
+            for p in data['vencendo_em_breve']:
+                mensagem += f"• {p['nome']} (Vence: {p['ultima_validade']})\n"
+            mensagem += "\n"
+            
+        if data['estoque_baixo']:
+            mensagem += "🛒 **PRECISA COMPRAR (Estoque Baixo):**\n"
+            for p in data['estoque_baixo']:
+                mensagem += f"• {p['nome']} ({p['estoque_atual']} {p['unidade_medida']} restante)\n"
+        
+        if not data['vencendo_em_breve'] and not data['estoque_baixo']:
+            mensagem += "✅ Tudo em ordem! O estoque está saudável."
+            
+        await update.message.reply_text(mensagem, parse_mode="Markdown")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao buscar status: {e}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_chat.id
+    print(
+        f"DEBUG: O Chat ID deste usuário é: {user_id}"
+    )  # Vai aparecer no seu terminal
+    await update.message.reply_text(
+        "Olá! Sou o Hejmabot. Posso te ajudar a gerenciar seu estoque doméstico.\n"
+        "Use /estoque para ver o que temos."
+    )
 
 
 if __name__ == "__main__":
@@ -180,16 +249,18 @@ if __name__ == "__main__":
     job_queue = app.job_queue
 
     # Roda todo dia às 09:00 da manhã
-    job_queue.run_daily(callback_validade, time=time(hour=9, minute=0, second=0))
+    # job_queue.run_daily(callback_validade, time=time(hour=9, minute=0, second=0))
 
     # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("estoque", estoque))
-    app.add_handler(CommandHandler("checar", checar_agora))
+    app.add_handler(CommandHandler("status", verificar_status))
     app.add_handler(CommandHandler("usar", usar_item))
     app.add_handler(CommandHandler("relatorio", gerar_relatorio_mensal))
+    app.add_handler(CommandHandler("sugerir_jantar", sugerir_jantar))
+
     app.add_handler(
-        MessageHandler(filters.TEXT & (~filters.COMMAND), processar_mensagem_texto)
+        MessageHandler(filters.TEXT & (~filters.COMMAND), registrar_compra)
     )
 
     print(f"Hejmabot online (Conectado em {API_URL})...")
