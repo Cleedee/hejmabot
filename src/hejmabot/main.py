@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, time, date
+import datetime
 from dotenv import load_dotenv 
 
 from telegram import Update
@@ -13,12 +13,6 @@ from telegram.ext import (
 import httpx
 
 from hejmabot.api_client import EstoqueAPI
-from hejmabot.nlp_processor import (
-        ProcessadorUniversal, 
-        AnalistaEconomico,
-        ProcessadorCompras,
-        Receitas
-)
 
 load_dotenv()
 
@@ -28,11 +22,39 @@ CHAT_ID_PESSOAL = os.getenv("CHAT_ID_PESSOAL")
 
 api = EstoqueAPI(base_url=API_URL)
 
-nlp = ProcessadorUniversal()
+async def gerar_lista_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_URL}/produtos/lista-compras")
+            produtos = response.json()
 
-processador = ProcessadorCompras()
+        if not produtos:
+            await update.message.reply_text("✅ O seu stock está cheio! Não precisa de comprar nada agora.")
+            return
 
-receitas = Receitas()
+        # Cabeçalho da nota
+        hoje = datetime.date.today().strftime("%d/%m")
+        texto_lista = f"🛒 **Lista de Compras ({hoje})**\n\n"
+        
+        categoria_atual = ""
+        for p in produtos:
+            # Organizar por categoria ajuda muito na logística dentro do mercado
+            if p['categoria'] != categoria_atual:
+                categoria_atual = p['categoria']
+                texto_lista += f"\n**{categoria_atual.upper()}**\n"
+            
+            # Formato compatível com 'Copiar e Colar' do Keep
+            # O Keep transforma linhas iniciadas com [ ] ou - em checkboxes
+            texto_lista += f"☐ {p['nome']} (Atual: {p['estoque_atual']} {p['unidade_medida']})\n"
+
+        await update.message.reply_text(
+            texto_lista + "\n\n*Dica: Copie esta mensagem e cole numa nota do Google Keep!*",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao gerar lista: {e}")
+
 
 async def sugerir_jantar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Feedback imediato ao usuário
@@ -50,10 +72,10 @@ async def sugerir_jantar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # 3. IA processa a receita
-        receita = await receitas.sugerir_receita(vencendo)
+        resposta = await api.sugerir_receita()
         
         await update.message.reply_text(
-            f"💡 **Sugestão do Chef Hejmai:**\n\n{receita}", 
+            f"💡 **Sugestão do Chef Hejmai:**\n\n{resposta['receita']}", 
             parse_mode="Markdown"
         )
 
@@ -100,26 +122,6 @@ async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except ValueError:
         await update.message.reply_text("❌ A quantidade deve ser um número (ex: /usar 0.5 leite).")
-
-async def gerar_relatorio_mensal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 O Ollama está analisando seu consumo do último mês..."
-    )
-    try:
-        # 1. Busca dados na API
-        historico = api.buscar_historico_consumo()
-
-        # 2. IA analisa
-        analista = AnalistaEconomico()
-        analise = analista.analisar_gastos(historico)
-
-        await update.message.reply_text(
-            f"📊 **Relatório de Consumo Local:**\n\n{analise}", parse_mode="Markdown"
-        )
-
-    except Exception as e:
-        await update.message.reply_text(f"Erro ao gerar relatório: {e}")
-
 
 async def usar_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -177,27 +179,13 @@ async def estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def registrar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text
     
-    status_msg = await update.message.reply_text("🧠 Analisando sua entrada...")
+    await update.message.reply_text("🧠 Analisando sua entrada...")
     
     try:
-        # A mágica acontece aqui: o Ollama gera o JSON relacional
-        dados_json = await processador.extrair_dados_relacionais(texto)
-        
         # Envia para o seu backend FastAPI na porta 8081
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{API_URL}/compras/registrar-lote", 
-                json=dados_json
-            )
-            
-            if response.status_code == 201:
-                res = response.json()
-                await update.message.reply_text(
-                    f"📦 {res['itens']} itens registrados com sucesso no banco relacional!"
-                )
-            else:
-                await update.message.reply_text("❌ Erro ao salvar no banco de dados.")
-                
+        msg = api.processar_entrada_livre(texto)
+        await update.message.reply_text(msg)
+               
     except Exception as e:
         await update.message.reply_text(f"⚠️ Falha no processamento da IA: {e}")
 
@@ -249,15 +237,15 @@ if __name__ == "__main__":
     job_queue = app.job_queue
 
     # Roda todo dia às 09:00 da manhã
-    # job_queue.run_daily(callback_validade, time=time(hour=9, minute=0, second=0))
+    # job_queue.run_daily(callback_validade, time=datetime.time(hour=9, minute=0, second=0))
 
     # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("estoque", estoque))
     app.add_handler(CommandHandler("status", verificar_status))
     app.add_handler(CommandHandler("usar", usar_item))
-    app.add_handler(CommandHandler("relatorio", gerar_relatorio_mensal))
     app.add_handler(CommandHandler("sugerir_jantar", sugerir_jantar))
+    app.add_handler(CommandHandler("lista_compras", gerar_lista_keep))
 
     app.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), registrar_compra)

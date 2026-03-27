@@ -40,3 +40,27 @@ class EstoqueAPI:
             else:
                 url = f"{self.base_url}/itens/{item_id}/consumir"
             response = await client.patch(url)
+
+
+    async def processar_entrada_livre(self, texto):
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{self.base_url}/processar-entrada-livre", 
+                json={"texto": texto},
+                timeout=30.0 # O Ollama pode demorar um pouco
+            )
+
+            if response.status_code == 200:
+                msg = response.json()["mensagem_bot"]
+                return f"✅ {msg}"
+            else:
+                return "❌ Erro ao processar no servidor."
+
+    async def sugerir_receita(self):
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url}/sugerir-receita"
+            response = await client.get(url)
+            if response.status_code != 200:
+                print(f"Erro na API: Status {response.status_code} - {response.text}")
+                return []
+            return response.json()
