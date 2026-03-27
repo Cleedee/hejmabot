@@ -22,6 +22,34 @@ CHAT_ID_PESSOAL = os.getenv("CHAT_ID_PESSOAL")
 
 api = EstoqueAPI(base_url=API_URL)
 
+async def gerar_lista_orcada(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        itens = api.lista_compras_detalhada()
+
+        if not itens:
+            await update.message.reply_text("✅ O stock está em dia! Nada para comprar.")
+            return
+
+        hoje = datetime.date.today().strftime("%d/%m")
+        texto = f"📝 **Orçamento de Compras ({hoje})**\n"
+        texto += "--- Copie abaixo para o Keep ---\n\n"
+        
+        total_estimado = 0
+        for item in itens:
+            preco = item['preco_referencia']
+            total_estimado += preco
+            
+            # Formato: [ ] Item - R$ Preço (Referência)
+            texto += f"☐ {item['nome']} - (Ref: R$ {preco:.2f})\n"
+        
+        texto += f"\n💰 **Estimativa Total: R$ {total_estimado:.2f}**"
+        texto += "\n\n*Dica: Cole no Keep e ative as Checkboxes!*"
+
+        await update.message.reply_text(texto, parse_mode="Markdown")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao gerar lista: {e}")
+
 async def gerar_lista_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async with httpx.AsyncClient() as client:
@@ -245,7 +273,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("status", verificar_status))
     app.add_handler(CommandHandler("usar", usar_item))
     app.add_handler(CommandHandler("sugerir_jantar", sugerir_jantar))
-    app.add_handler(CommandHandler("lista_compras", gerar_lista_keep))
+    app.add_handler(CommandHandler("lista_compras", gerar_lista_orcada))
 
     app.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), registrar_compra)

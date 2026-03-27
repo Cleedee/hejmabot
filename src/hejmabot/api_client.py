@@ -5,6 +5,11 @@ class EstoqueAPI:
     def __init__(self, base_url: str = "http://127.0.0.1:8081"):
         self.base_url = base_url
 
+    async def lista_compras_detalhada(self):
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_URL}/produtos/lista-compras-detalhada")
+            return response.json()
+
     async def buscar_historico_consumo(self, dias: int = 30):
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{self.base_url}/itens/historico-consumo/?dias={dias}")
