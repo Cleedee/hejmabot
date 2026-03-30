@@ -7,12 +7,16 @@ class EstoqueAPI:
 
     async def lista_compras_detalhada(self):
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{API_URL}/produtos/lista-compras-detalhada")
+            response = await client.get(
+                f"{self.base_url}/produtos/lista-compras-detalhada"
+            )
             return response.json()
 
     async def buscar_historico_consumo(self, dias: int = 30):
         async with httpx.AsyncClient() as client:
-            r = await client.get(f"{self.base_url}/itens/historico-consumo/?dias={dias}")
+            r = await client.get(
+                f"{self.base_url}/itens/historico-consumo/?dias={dias}"
+            )
             return r.json()
 
     async def buscar_alertas(self, dias: int = 5):
@@ -26,9 +30,9 @@ class EstoqueAPI:
 
             return response.json()
 
-    async def listar_itens(self):
+    async def listar_produtos(self):
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/itens/")
+            response = await client.get(f"{self.base_url}/produtos/todos")
             response.raise_for_status()
             return response.json()
 
@@ -46,19 +50,23 @@ class EstoqueAPI:
                 url = f"{self.base_url}/itens/{item_id}/consumir"
             response = await client.patch(url)
 
-
     async def processar_entrada_livre(self, texto):
         async with httpx.AsyncClient() as client:
+            print("1")
             response = await client.post(
-                f"http://{self.base_url}/processar-entrada-livre", 
+                f"{self.base_url}/processar-entrada-livre",
                 json={"texto": texto},
-                timeout=30.0 # O Ollama pode demorar um pouco
+                timeout=160.0,  # O Ollama pode demorar um pouco
             )
 
+            print("2")
             if response.status_code == 200:
+                print("3")
                 msg = response.json()["mensagem_bot"]
+                print("4")
                 return f"✅ {msg}"
             else:
+                print("5")
                 return "❌ Erro ao processar no servidor."
 
     async def sugerir_receita(self):
