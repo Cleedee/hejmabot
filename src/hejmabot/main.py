@@ -23,6 +23,39 @@ CHAT_ID_PESSOAL = os.getenv("CHAT_ID_PESSOAL")
 api = EstoqueAPI(base_url=API_URL)
 
 
+async def comando_pergunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pergunta = " ".join(context.args)
+    if not pergunta:
+        await update.message.reply_text(
+            "🤔 O que você quer saber? Ex: /pergunta quanto gastei com carne este mês?"
+        )
+        return
+
+    await update.message.reply_text("🔍 Consultando o cérebro do Hejmai...")
+
+    async with httpx.AsyncClient() as client:
+        # Enviamos a pergunta para o novo endpoint do backend
+        response = await client.post(
+            f"{API_URL}/ia/perguntar",
+            json={"pergunta": pergunta},
+            timeout=160.0,  # O Ollama pode demorar um pouco
+        )
+
+        if response.status_code == 200:
+            dados = response.json()
+            resposta_texto = dados["resposta"]
+            # Opcional: mostrar a query SQL para você (como dev) validar
+            sql_debug = (
+                f"\n\n`SQL: {dados['query']}`" if context.args[0] == "debug" else ""
+            )
+
+            await update.message.reply_text(
+                f"🤖 {resposta_texto}{sql_debug}", parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("❌ Erro ao processar a pergunta pela IA.")
+
+
 async def gerar_lista_orcada(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         itens = await api.lista_compras_detalhada()
@@ -180,6 +213,7 @@ async def verificar_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Erro ao buscar status: {e}")
 
+
 async def comando_estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async with httpx.AsyncClient() as client:
@@ -187,45 +221,59 @@ async def comando_estoque(update: Update, context: ContextTypes.DEFAULT_TYPE):
             estoque = response.json()
 
         if not estoque:
-            await update.message.reply_text("📭 O estoque está vazio. Hora de usar o Streamlit para a carga inicial!")
+            await update.message.reply_text(
+                "📭 O estoque está vazio. Hora de usar o Streamlit para a carga inicial!"
+            )
             return
 
         mensagem = "🏠 **Inventário Hejmai**\n\n"
         categoria_atual = ""
-        
+
         # Mapeamento simples de emojis para categorias canônicas
         icones = {
-            "Açougue": "🥩", "Laticínios": "🥛", "Hortifruti": "🍎",
-            "Mercearia": "🌾", "Higiene": "🧼", "Limpeza": "🧹", "Padaria": "🥖",
+            "Açougue": "🥩",
+            "Laticínios": "🥛",
+            "Hortifruti": "🍎",
+            "Mercearia": "🌾",
+            "Higiene": "🧼",
+            "Limpeza": "🧹",
+            "Padaria": "🥖",
             "Bebidas": "🍶",
         }
 
         for p in estoque:
             # Cabeçalho de Categoria
-            if p['categoria'] != categoria_atual:
-                categoria_atual = p['categoria']
+            if p["categoria"] != categoria_atual:
+                categoria_atual = p["categoria"]
                 icone = icones.get(categoria_atual, "📦")
                 mensagem += f"\n{icone} **{categoria_atual.upper()}**\n"
-            
+
             # Formatação do Item
-            validade_str = datetime.datetime.strptime(p['ultima_validade'], '%Y-%m-%d').strftime('%d/%m')
-            
+            validade_str = datetime.datetime.strptime(
+                p["ultima_validade"], "%Y-%m-%d"
+            ).strftime("%d/%m")
+
             # Alerta visual se estiver vencendo em menos de 3 dias
             hoje = datetime.date.today()
-            vencimento = datetime.datetime.strptime(p['ultima_validade'], '%Y-%m-%d').date()
+            vencimento = datetime.datetime.strptime(
+                p["ultima_validade"], "%Y-%m-%d"
+            ).date()
             alerta = "⚠️" if (vencimento - hoje).days <= 3 else "🔹"
-            
+
             mensagem += f"{alerta} {p['nome']}: {p['estoque_atual']} {p['unidade_medida']} (Vence: {validade_str})\n"
 
         # Dividir a mensagem se for muito longa (limite do Telegram é 4096 caracteres)
         if len(mensagem) > 4000:
             for i in range(0, len(mensagem), 4000):
-                await update.message.reply_text(mensagem[i:i+4000], parse_mode="Markdown")
+                await update.message.reply_text(
+                    mensagem[i : i + 4000], parse_mode="Markdown"
+                )
         else:
             await update.message.reply_text(mensagem, parse_mode="Markdown")
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erro ao ler estoque: {e}")
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
@@ -257,6 +305,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("usar", usar_item))
     app.add_handler(CommandHandler("sugerir_jantar", sugerir_jantar))
     app.add_handler(CommandHandler("lista_compras", gerar_lista_orcada))
+    app.add_handler(CommandHandler("pergunta", comando_pergunta))
 
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), registrar_compra))
 
